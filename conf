@@ -1,0 +1,5 @@
+{
+	"DBConn": ["host=yourdbservergoeshere dbname=tnvnm user=tnvnm password=letmein sslmode=enable"],
+	"StatusInterval": 60
+}
+
