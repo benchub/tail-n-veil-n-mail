@@ -38,21 +38,21 @@ How to use it
 6. Import some buckets and their associated filters. example filters.sql has some examples.
    Also see https://github.com/benchub/tail-n-veil-n-mail-import, which makes it easy. 
    Some things to know:
-   a. buckets.eat_it=true means that a match with this bucket won't be passed on down to
+   1. buckets.eat_it=true means that a match with this bucket won't be passed on down to
       the next filter.
-   b. buckets.report_it=true means that matches to the bucket will be recorded in the db.
-   c. buckets.workers is a count for how many concurrent works will be looking for matches
+   2. buckets.report_it=true means that matches to the bucket will be recorded in the db.
+   3. buckets.workers is a count for how many concurrent works will be looking for matches
       for the filters for this bucket. Usually you want this to be 1, but if you have 
       something that will match far more often than other things, give it another worker.
       The speed may or may not make much of a difference, but the filter chain is built 
       with buckets having the most workers doing their work first (the idea being there
       will be less work for the remaining buckets).
-   d. buckets.active=true means the bucket will get loaded by tail-n-veil-n-mail upon 
+   4. buckets.active=true means the bucket will get loaded by tail-n-veil-n-mail upon 
       start.
-   e. filters.report=true means that filters.uses will increment when a filter matches.
+   5. filters.report=true means that filters.uses will increment when a filter matches.
 7. Modify conf to fit your environment.
-   a. DBConn is hopefully self-explanitory
-   b. StatusInterval is how often to report status to stdout.
+   1. DBConn is hopefully self-explanitory
+   2. StatusInterval is how often to report status to stdout.
 8. Run it already, like so: tail_n_veil_n_mail -config=conf -log=/var/log/postgres.log
    If you're recovering from a crash, -warp will be useful to not have to restart at the
    beginning. Just use the most recent seek value from the output (assuming the file 
