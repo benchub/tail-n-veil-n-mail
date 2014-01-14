@@ -9,20 +9,26 @@ unexpected happens. It works well, but we've found that:
    then you have zero clue on how often it's happening without additional log file digging.
 
 tail-n-veil-n-mail attempts to address these things. We address #1 by using go instad of 
-perl, and #2 by storing filtered log entries in a database. On start, it will read the 
-list of buckets to group log entries together into (e.g. "starting up noise", "bug 123", 
-"utf8 errors") and the regex filters used to do the grouping. Then it will start tailing a
-file and do a whole lot of regex matching. When a regex filter matches a log event, it 
-will be stored in the event database if the corrosponding bucket is configured to keep 
-matches. 
+perl, and #2 by storing interesting log entries in a database for later access. On start, 
+it will read the list of buckets to group log entries together into (e.g. "starting up 
+noise", "bug 123", "utf8 errors") and also the regex filters used to do the grouping. 
+Then it will start tailing a file and keep track of the syslog events in flight. 
+
+When an event "completes" (either because that same syslog ID go reused, or because
+enough time passed since we last saw a line for that syslog ID), the completed event is 
+passed to the regex filters that got loaded from the database during startup. The event
+is passed from filter to filter until one matches. When a regex filter matches a log event, 
+it will be stored in the event database if the corrosponding bucket is configured to keep 
+matches. If an event matches *no* filters, then it is considered "interesting", and gets
+a special status in the UI.
 
 Assumptions
 ===========
 As a young project tail-n-veil-n-mail makes a lot of assumptions. Among them:
 
 1. You are using a centralized log server with syslog-style logging.
-2. You have databases with distinct non-qualified host names (i.e. db1 and db2, *not* 
-   db.foo and db.bar)
+2. You have databases with distinct non-qualified host names (i.e. db-foo and db-bar, 
+   *not* db.foo and db.bar)
 
 How to use it
 =============
@@ -50,7 +56,13 @@ How to use it
    4. buckets.active=true means the bucket will get loaded by tail-n-veil-n-mail upon 
       start.
    5. filters.report=true means that filters.uses will increment when a filter matches.
-7. Modify conf to fit your environment.
+   Finally, given that this is a replacement for tail-n-mail, you might (wrongly) assume
+   that the perl regular expressions you wrote for tail-n-mail will work here. They may
+   or may not - Go's regular expressions are a little more Ivory colored than perl's.
+   Also, while tail-n-mail squashed everything on to one line (most of the time),
+   tail-n-veil-n-mail exlicitly only does that when there's a newline in the query. You
+   may need to preface your regex patterns with (?s) to get them to span newlines.
+7. Modify the conf to fit your environment.
    1. DBConn is hopefully self-explanitory
    2. StatusInterval is how often to report status to stdout.
 8. Run it already, like so: tail_n_veil_n_mail -config=conf -log=/var/log/postgres.log
@@ -61,12 +73,7 @@ How to use it
 
 Known Issues
 ============
-When tailing for new log lines, we wait for a full line before processing. Or at least
-we're supposed to only get full lines; sometimes, it seems we get partial lines. That 
-throws off our parsers and we crash. So lame. We need to buffer lines so that if the
-current line appears to be a genuine new line, only then process the previous line. 
-Otherwise, append the current line to the previous line and hope for the best with the
-next line we read.
+It's not yet done
 
 TODO
 ====
@@ -81,3 +88,4 @@ Um yeah quite a bit.
 - Allow run-time config reloading.
 - Dump status to a logfile instead of stdout.
 - Dump errors to a logfile instead of stderr.
+- Send alerts when we get interesting things.

@@ -1,6 +1,7 @@
 package main
 
 import (
+  "errors"
   "fmt"
   "time"
   "os"
@@ -86,44 +87,55 @@ var protectedEventsInFlight = struct{
   m map[LogKey]*LogEvent
 } {m: make(map[LogKey]*LogEvent)}
 
+var re_logid,_ = regexp.Compile(`[0-9]+-[0-9]+`)
+
+type RawLine struct {
+  t time.Time
+  host string
+  text string
+  keyID uint64
+  keyLine uint64
+}
+
+
+func decodeSyslogPrefix(blob string) (RawLine,error) {
+  r := RawLine{}
+  var err error
+
+  // break out the stuff that syslog adds to every line
+  syslogTokens := strings.SplitN(blob," ",5)
+  if len(syslogTokens) != 5 {
+    return RawLine{}, errors.New("couldn't split line into 5 tokens")
+  }
+  r.t, err = time.Parse(time.RFC3339Nano,syslogTokens[0])
+  if err != nil {
+    return RawLine{}, errors.New("couldn't parse time")
+  }
+  r.host = syslogTokens[1]
+  r.text = syslogTokens[4]
+    
+  logid := re_logid.FindString(syslogTokens[3])
+  logidTokens := strings.Split(logid,"-")
+  r.keyID, err = strconv.ParseUint(logidTokens[0],10,32)
+  if err != nil {
+    return RawLine{}, errors.New("Couldn't parse keyID")
+  }
+  r.keyLine, err = strconv.ParseUint(logidTokens[1],10,32)
+  if err != nil {
+    return RawLine{}, errors.New("Couldn't parse keyLine")
+  }
+
+  return r,nil
+}
+
 // A function to take a new event and either merge it with one already in flight,
 // or, if the eventKey isn't already in flight, make a new event.
 func assembleRawLines(newlines chan *LogEvent) {
-  // We'll need to be able to parse syslog [event-line] pairings
-  re_logid, err := regexp.Compile(`[0-9]+-[0-9]+`)
-  if err != nil {
-    fmt.Fprintln(os.Stderr, "re_logid:", err)
-  }
-
   for {
     line := <- newlines
     
     if line.eventText == "" {
       continue
-    }
-    
-    // break out the stuff that syslog adds to every line
-    syslogTokens := strings.SplitN(line.eventText," ",5)
-    line.eventTimeStart, err = time.Parse(time.RFC3339Nano,syslogTokens[0])
-    line.eventTimeEnd = line.eventTimeStart
-    if err != nil {
-      fmt.Fprintln(os.Stderr, "times are hard:", err)
-      os.Exit(10)
-    }
-    line.key.host = syslogTokens[1]
-    line.eventText = syslogTokens[4]
-    
-    logid := re_logid.FindString(syslogTokens[3])
-    logidTokens := strings.Split(logid,"-")
-    line.key.id, err = strconv.ParseUint(logidTokens[0],10,32)
-    if err != nil {
-      fmt.Fprintln(os.Stderr, "logids are hard:", err)
-      os.Exit(11)
-    }
-    line.lines, err = strconv.ParseUint(logidTokens[1],10,32)
-    if err != nil {
-      fmt.Fprintln(os.Stderr, "logid lines are hard:", err)
-      os.Exit(12)
     }
     
     protectedEventsInFlight.RLock()
@@ -238,7 +250,7 @@ func main() {
   // start a goroutine to remove things that are ready to process from the inflight list
   go cullStuff(cull)
   
-  // set up our filters goroutines
+  // set up our filter goroutines
   setUpParsers(db)
   go updateFilterUsages(db)
   
@@ -266,22 +278,39 @@ func main() {
   
   caughtUp := false
   fmt.Println("Beginning to catchup scan to", mostRecentCompletedEvent)
+
+  buffer := RawLine{}
   for {
     newEvent := LogEvent{}
     line := <- logfile.Lines
-      newEvent.eventText = line.Text
+      // Now, sadly, we can't be assured that the line we're getting here is actually a complete line.
+      // It appears that it might sometimes end on an EOF, and that the *next* line we read will be a continuation of the current line.
+      // So buffer it, and when we find a new line, process the buffered one instead, and then buffer the current line for the next pass.
+      // If our current line does *not* appear to be a new line, append to the buffer and don't process anything.
+      rawline, err := decodeSyslogPrefix(line.Text)
+      if err != nil {
+        // Looks like this wasn't a newline after all. 
+        buffer.text = fmt.Sprint(buffer.text,line.Text)
+        continue
+      } else {
+        buffer = rawline
+        if buffer.text != "" {
+          newEvent.eventText = buffer.text
+          newEvent.eventTimeStart = buffer.t
+          newEvent.eventTimeEnd = buffer.t
+          newEvent.key.host = buffer.host
+          newEvent.key.id = buffer.keyID
+          newEvent.lines = buffer.keyLine
+        } else {
+          // If our buffer contained nothing, do nothing
+          continue
+        }
+      }
       
       if !caughtUp {
-        tokens := strings.SplitN(newEvent.eventText," ",2)
-        when, err := time.Parse(time.RFC3339Nano,tokens[0])
-        if err != nil {
-          fmt.Fprintln(os.Stderr, "times are hard when catching up:", err)
-          os.Exit(13)
-        }
+        lastEventAt = newEvent.eventTimeStart
 
-        lastEventAt = when
-
-        if mostRecentCompletedEvent.Before(when) {
+        if mostRecentCompletedEvent.Before(newEvent.eventTimeStart) {
           fmt.Println("Catchup complete!")
           caughtUp = true
           rawlines <- &newEvent
