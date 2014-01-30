@@ -1,5 +1,7 @@
 {
 	"DBConn": ["host=yourdbservergoeshere dbname=tnvnm user=tnvnm password=letmein sslmode=enable"],
-	"StatusInterval": 60
+	"StatusInterval": 60,
+	"EmailInterval": 300,
+	"EmailsTo": ["alertsgohere@yourdomain.com"]
 }
 

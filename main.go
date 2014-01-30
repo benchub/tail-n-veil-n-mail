@@ -1,10 +1,12 @@
 package main
 
 import (
+  "bytes"
   "errors"
   "fmt"
   "time"
   "os"
+  "os/exec"
   "regexp"
   "strings"
   "strconv"
@@ -116,6 +118,9 @@ func decodeSyslogPrefix(blob string) (RawLine,error) {
     
   logid := re_logid.FindString(syslogTokens[3])
   logidTokens := strings.Split(logid,"-")
+  if len(logidTokens) != 2 {
+    return RawLine{}, errors.New("couldn't split logid into 2 tokens")
+  }
   r.keyID, err = strconv.ParseUint(logidTokens[0],10,32)
   if err != nil {
     return RawLine{}, errors.New("Couldn't parse keyID")
@@ -190,12 +195,16 @@ var noIdleHandsFlag = flag.Bool("noIdleHands", false, "when set to true, kill us
 type Configuration struct {
   DBConn []string
   StatusInterval int
+  EmailInterval int
+  EmailsTo []string
 }
 
 func main() {
   var db *sql.DB
   var status_interval int
-  
+  var email_interval int
+  var send_alerts_to []string
+
   flag.Parse()
   
   if len(os.Args) == 1 {
@@ -224,6 +233,8 @@ func main() {
     }
     
     status_interval = configuration.StatusInterval
+    email_interval = configuration.EmailInterval
+    send_alerts_to = configuration.EmailsTo
   }
 
   if *logFileFlag == "" {
@@ -263,9 +274,12 @@ func main() {
   }
 
   
-  // we like stats
+  // We like stats
   go reportProgress(*noIdleHandsFlag, status_interval, logfile)
-  
+
+  // We like emails for interesting things
+  go sendEmails(email_interval, db, send_alerts_to)
+
   // set up a single goroutine to write to the db
   go reportEvent(db)
   
@@ -414,6 +428,35 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
     
     lastProcessed = eventCount
     warpTo.Offset, _ = logfile.Tell()
+    time.Sleep(time.Duration(interval) * time.Second)
+  }
+}
+
+func sendEmails(interval int, db *sql.DB, emails []string) {
+
+  for {
+    
+    var interestingThings int
+    err := db.QueryRow(fmt.Sprintf("select count(*) from events where bucket_id is null and finished > now()-interval '%d seconds'", interval)).Scan(&interestingThings)
+    if err != nil {
+      fmt.Println("couldn't find most recent event", err)
+      os.Exit(3)
+    }
+    if (interestingThings > 0) {
+      for i := range emails {
+        cmd := exec.Command("mailx", "-s", "new interesting things!",emails[i])
+        cmd.Stdin = strings.NewReader("New interesting things in production postgres logs! https://pgfouine.us-east-1.canvas.insops.net/bucketDetails.php?days=.042")
+        var out bytes.Buffer
+        cmd.Stdout = &out
+        err := cmd.Run()
+        if err != nil {
+          fmt.Println(err)
+          os.Exit(3)
+        }
+        fmt.Printf("got a return of: %q\n", out.String())
+      }
+    }
+
     time.Sleep(time.Duration(interval) * time.Second)
   }
 }

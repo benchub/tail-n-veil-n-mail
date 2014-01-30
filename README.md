@@ -29,6 +29,7 @@ As a young project tail-n-veil-n-mail makes a lot of assumptions. Among them:
 1. You are using a centralized log server with syslog-style logging.
 2. You have databases with distinct non-qualified host names (i.e. db-foo and db-bar, 
    *not* db.foo and db.bar)
+3. You have mailx installed where you'll be running tail-n-veil-n-mail.
 
 How to use it
 =============
@@ -64,7 +65,10 @@ How to use it
    may need to preface your regex patterns with (?s) to get them to span newlines.
 7. Modify the conf to fit your environment.
    1. DBConn is hopefully self-explanitory
-   2. StatusInterval is how often to report status to stdout.
+   2. StatusInterval is how often to report status (in seconds).
+   3. EmailInterval is how often to look for interesting things (in seconds).
+   4. EmailsTo is an array of emails to send a notice to if any intersting things have
+      observed since the last check.
 8. Run it already, like so: tail_n_veil_n_mail -config=conf -log=/var/log/postgres.log
    If you're recovering from a crash, -warp will be useful to not have to restart at the
    beginning. Just use the most recent seek value from the output (assuming the file 
@@ -88,4 +92,8 @@ Um yeah quite a bit.
 - Allow run-time config reloading.
 - Dump status to a logfile instead of stdout.
 - Dump errors to a logfile instead of stderr.
-- Send alerts when we get interesting things.
+- Allow observations of a bucket to also trigger emails, instead of just interesting things.
+  Probably good to give each bucket a specific list of email addresses to use if the
+  default isn't wanted.
+- Support a MUA other than mailx.
+- Configurable alert email.
