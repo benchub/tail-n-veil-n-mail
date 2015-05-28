@@ -97,3 +97,5 @@ Um yeah quite a bit.
   default isn't wanted.
 - Support a MUA other than mailx.
 - Configurable alert email.
+- Allow buckets to apply to host groups, intead of just specific hosts.
+

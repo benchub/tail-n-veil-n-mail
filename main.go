@@ -434,18 +434,37 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
 
 func sendEmails(interval int, db *sql.DB, emails []string) {
 
-  for {
-    
-    var interestingThings int
-    err := db.QueryRow(fmt.Sprintf("select count(*) from events where bucket_id is null and finished > now()-interval '%d seconds'", interval)).Scan(&interestingThings)
+  emailHeader := "<html><body>For more details: https://instructure.atlassian.net/wiki/display/IOPS/tail-n-veil-n-mail%2C+or%2C+How+I+Learned+to+Stop+h8ing+on+tail-n-mail\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
+  emailFooter := "</table></body></html>"
+
+  for {    
+    rows, err := db.Query(fmt.Sprintf("select count(*),host,normalize_query(event) from events where bucket_id is null and finished > now()-interval '%d seconds' group by host,normalize_query(event) order by normalize_query(event),host,count(*) desc", interval))
     if err != nil {
-      fmt.Println("couldn't find most recent event", err)
+      fmt.Println("couldn't find recent interesting events", err)
       os.Exit(3)
     }
-    if (interestingThings > 0) {
+    emailBody := ""
+    for rows.Next() {
+      var count int
+      var host string
+      var event string
+
+      err = rows.Scan(&count, &host, &event)
+      if err != nil {
+        fmt.Println("couldn't scan interesting event", err)
+        os.Exit(3)
+      }
+      emailBody = fmt.Sprintf("%s<tr><td>%d</td><td>%s</td><td><pre>%s</pre></td></tr>\n",emailBody,count,host,event)
+    }
+    err = rows.Err()
+    if err != nil {
+      fmt.Println("couldn't ennumerate interesting events", err)
+      os.Exit(3)
+    }
+    if (!strings.EqualFold("",emailBody)) {
       for i := range emails {
-        cmd := exec.Command("mailx", "-s", "new interesting things!",emails[i])
-        cmd.Stdin = strings.NewReader("New interesting things in production postgres logs! https://pgfouine.us-east-1.canvas.insops.net/bucketDetails.php?days=.042")
+        cmd := exec.Command("mailx", "-a", "Content-Type: text/html", "-s", "new interesting things in production postgres logs!",emails[i])
+        cmd.Stdin = strings.NewReader(fmt.Sprintf("%s\n%s\n%s",emailHeader,emailBody,emailFooter))
         var out bytes.Buffer
         cmd.Stdout = &out
         err := cmd.Run()

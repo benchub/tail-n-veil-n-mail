@@ -17,6 +17,10 @@ func setUpParsers(db *sql.DB) {
   lastFilter = nil
   
   buckets, err := db.Query(`select id,name,workers,eat_it,report_it from buckets where active order by eat_it desc, workers desc`)
+  if err != nil {
+    fmt.Println("couldn't select bucket list", err)
+    os.Exit(3)
+  }
   for buckets.Next() {
     var id,workers int
     var name string
@@ -33,10 +37,6 @@ func setUpParsers(db *sql.DB) {
     } else {
       lastFilter = setUpParsersForBucket(db, firstFilter,id,name,workers,eatIt,reportIt)
     }
-  }
-  if err != nil {
-    fmt.Println("couldn't select bucket list", err)
-    os.Exit(3)
   }
   buckets.Close()
 
