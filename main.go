@@ -197,6 +197,8 @@ type Configuration struct {
   StatusInterval int
   EmailInterval int
   EmailsTo []string
+  EmailSubject string
+  EmailHeader string
 }
 
 func main() {
@@ -204,6 +206,8 @@ func main() {
   var status_interval int
   var email_interval int
   var send_alerts_to []string
+  var email_subject string
+  var email_header string
 
   flag.Parse()
   
@@ -235,6 +239,8 @@ func main() {
     status_interval = configuration.StatusInterval
     email_interval = configuration.EmailInterval
     send_alerts_to = configuration.EmailsTo
+    email_subject = configuration.EmailSubject
+    email_header = configuration.EmailHeader
   }
 
   if *logFileFlag == "" {
@@ -278,7 +284,7 @@ func main() {
   go reportProgress(*noIdleHandsFlag, status_interval, logfile)
 
   // We like emails for interesting things
-  go sendEmails(email_interval, db, send_alerts_to)
+  go sendEmails(email_interval, db, send_alerts_to, email_subject, email_header)
 
   // set up a single goroutine to write to the db
   go reportEvent(db)
@@ -432,9 +438,9 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
   }
 }
 
-func sendEmails(interval int, db *sql.DB, emails []string) {
+func sendEmails(interval int, db *sql.DB, emails []string, subject string, header string) {
 
-  emailHeader := "<html><body>For more details: https://instructure.atlassian.net/wiki/display/IOPS/tail-n-veil-n-mail%2C+or%2C+How+I+Learned+to+Stop+h8ing+on+tail-n-mail\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
+  emailHeader := "<html><body>" + header + "\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
   emailFooter := "</table></body></html>"
 
   for {    
@@ -463,7 +469,7 @@ func sendEmails(interval int, db *sql.DB, emails []string) {
     }
     if (!strings.EqualFold("",emailBody)) {
       for i := range emails {
-        cmd := exec.Command("mailx", "-a", "Content-Type: text/html", "-s", "new interesting things in production postgres logs!",emails[i])
+        cmd := exec.Command("mailx", "-a", "Content-Type: text/html", "-s", subject, emails[i])
         cmd.Stdin = strings.NewReader(fmt.Sprintf("%s\n%s\n%s",emailHeader,emailBody,emailFooter))
         var out bytes.Buffer
         cmd.Stdout = &out
@@ -472,7 +478,6 @@ func sendEmails(interval int, db *sql.DB, emails []string) {
           fmt.Println(err)
           os.Exit(3)
         }
-        fmt.Printf("got a return of: %q\n", out.String())
       }
     }
 
