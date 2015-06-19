@@ -241,6 +241,9 @@ func main() {
     send_alerts_to = configuration.EmailsTo
     email_subject = configuration.EmailSubject
     email_header = configuration.EmailHeader
+
+    // if we see configuration changes, we need to know about it
+    go watchForConfigChanges(db, configuration.DBConn[0], os.Args)
   }
 
   if *logFileFlag == "" {
@@ -273,7 +276,7 @@ func main() {
   
   // when we play catch-up, we need to know when the most recent completed event was
   var mostRecentCompletedEvent time.Time
-  err = db.QueryRow(`select coalesce(max(finished),'1970-01-01') from events`).Scan(&mostRecentCompletedEvent)
+  err = db.QueryRow("select coalesce(max(finished),'1970-01-01') from events").Scan(&mostRecentCompletedEvent)
   if err != nil {
     fmt.Println("couldn't find most recent event", err)
     os.Exit(3)
@@ -484,3 +487,4 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
     time.Sleep(time.Duration(interval) * time.Second)
   }
 }
+

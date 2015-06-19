@@ -31,6 +31,9 @@ As a young project tail-n-veil-n-mail makes a lot of assumptions. Among them:
    *not* db.foo and db.bar)
 3. You have mailx installed where you'll be running tail-n-veil-n-mail.
 
+tail-n-veil-n-mail actually supports multiple log servers, in independent regions...
+documenting this is a future challenge.
+
 How to use it
 =============
 1. Get and install Go. http://www.golang.org
@@ -54,8 +57,10 @@ How to use it
       The speed may or may not make much of a difference, but the filter chain is built 
       with buckets having the most workers doing their work first (the idea being there
       will be less work for the remaining buckets).
-   4. buckets.active=true means the bucket will get loaded by tail-n-veil-n-mail upon 
-      start.
+   4. buckets.active=true means the bucket should be displayed by the UI by default. This
+      is for cases where a bucket is expected to be matched, but you really don't care
+      about the matches. If you really want to see them, you could, but by and large,
+      things that would match inactive buckets are out of mind.
    5. filters.report=true means that filters.uses will increment when a filter matches.
    Finally, given that this is a replacement for tail-n-mail, you might (wrongly) assume
    that the perl regular expressions you wrote for tail-n-mail will work here. They may
@@ -89,7 +94,8 @@ Um yeah quite a bit.
 - Much moar better web interface
 - Support host name FQDNs so that we can distinguish between two "db1" instances in the
   same event db.
-- Allow run-time config reloading.
+- Allow run-time config reloading. We sort of have this, if the filter config changes,
+  but not if we want to make conf file changes only.
 - Dump status to a logfile instead of stdout.
 - Dump errors to a logfile instead of stderr.
 - Allow observations of a bucket to also trigger emails, instead of just interesting things.
