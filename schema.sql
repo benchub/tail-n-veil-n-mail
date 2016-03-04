@@ -70,7 +70,8 @@ CREATE TABLE events (
     finished timestamp with time zone NOT NULL,
     lines integer NOT NULL,
     fragment boolean DEFAULT false NOT NULL,
-    host text NOT NULL
+    host text NOT NULL,
+    worker text NOT NULL
 );
 ALTER TABLE public.events OWNER TO tnvnm;
 
