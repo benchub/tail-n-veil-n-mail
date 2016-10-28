@@ -197,6 +197,9 @@ type Configuration struct {
   StatusInterval int
   EmailInterval int
   EmailsTo []string
+  EmailSubject string
+  EmailHeader string
+  Worker string
 }
 
 func main() {
@@ -204,6 +207,9 @@ func main() {
   var status_interval int
   var email_interval int
   var send_alerts_to []string
+  var email_subject string
+  var email_header string
+  var worker string
 
   flag.Parse()
   
@@ -235,6 +241,12 @@ func main() {
     status_interval = configuration.StatusInterval
     email_interval = configuration.EmailInterval
     send_alerts_to = configuration.EmailsTo
+    email_subject = configuration.EmailSubject
+    email_header = configuration.EmailHeader
+    worker = configuration.Worker
+
+    // if we see configuration changes, we need to know about it
+    go watchForConfigChanges(db, configuration.DBConn[0], os.Args)
   }
 
   if *logFileFlag == "" {
@@ -267,7 +279,7 @@ func main() {
   
   // when we play catch-up, we need to know when the most recent completed event was
   var mostRecentCompletedEvent time.Time
-  err = db.QueryRow(`select coalesce(max(finished),'1970-01-01') from events`).Scan(&mostRecentCompletedEvent)
+  err = db.QueryRow("select coalesce(max(finished),'1970-01-01') from events").Scan(&mostRecentCompletedEvent)
   if err != nil {
     fmt.Println("couldn't find most recent event", err)
     os.Exit(3)
@@ -278,10 +290,10 @@ func main() {
   go reportProgress(*noIdleHandsFlag, status_interval, logfile)
 
   // We like emails for interesting things
-  go sendEmails(email_interval, db, send_alerts_to)
+  go sendEmails(email_interval, db, send_alerts_to, email_subject, email_header, worker)
 
   // set up a single goroutine to write to the db
-  go reportEvent(db)
+  go reportEvent(db, worker)
   
   // Lines need to be assembled in order, so only one assembler worker to look at lines,
   // but we can at least do that on another "thread" from where we're reading input and 
@@ -432,13 +444,13 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
   }
 }
 
-func sendEmails(interval int, db *sql.DB, emails []string) {
+func sendEmails(interval int, db *sql.DB, emails []string, subject string, header string, worker string) {
 
-  emailHeader := "<html><body>For more details: https://instructure.atlassian.net/wiki/display/IOPS/tail-n-veil-n-mail%2C+or%2C+How+I+Learned+to+Stop+h8ing+on+tail-n-mail\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
+  emailHeader := "<html><body>" + header + "\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
   emailFooter := "</table></body></html>"
 
   for {    
-    rows, err := db.Query(fmt.Sprintf("select count(*),host,normalize_query(event) from events where bucket_id is null and finished > now()-interval '%d seconds' group by host,normalize_query(event) order by normalize_query(event),host,count(*) desc", interval))
+    rows, err := db.Query(fmt.Sprintf("select count(*),host,normalize_query(event) from events where bucket_id is null and finished > now()-interval '%d seconds' and worker='%s' group by host,normalize_query(event) order by normalize_query(event),host,count(*) desc", interval, worker))
     if err != nil {
       fmt.Println("couldn't find recent interesting events", err)
       os.Exit(3)
@@ -463,7 +475,7 @@ func sendEmails(interval int, db *sql.DB, emails []string) {
     }
     if (!strings.EqualFold("",emailBody)) {
       for i := range emails {
-        cmd := exec.Command("mailx", "-a", "Content-Type: text/html", "-s", "new interesting things in production postgres logs!",emails[i])
+        cmd := exec.Command("mailx", "-a", "Content-Type: text/html", "-s", subject, emails[i])
         cmd.Stdin = strings.NewReader(fmt.Sprintf("%s\n%s\n%s",emailHeader,emailBody,emailFooter))
         var out bytes.Buffer
         cmd.Stdout = &out
@@ -472,10 +484,10 @@ func sendEmails(interval int, db *sql.DB, emails []string) {
           fmt.Println(err)
           os.Exit(3)
         }
-        fmt.Printf("got a return of: %q\n", out.String())
       }
     }
 
     time.Sleep(time.Duration(interval) * time.Second)
   }
 }
+

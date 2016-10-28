@@ -16,7 +16,7 @@ func setUpParsers(db *sql.DB) {
   var lastFilter chan*LogEvent
   lastFilter = nil
   
-  buckets, err := db.Query(`select id,name,workers,eat_it,report_it from buckets where active order by eat_it desc, workers desc`)
+  buckets, err := db.Query(`select id,name,workers,eat_it,report_it from buckets order by eat_it desc, workers desc`)
   if err != nil {
     fmt.Println("couldn't select bucket list", err)
     os.Exit(3)

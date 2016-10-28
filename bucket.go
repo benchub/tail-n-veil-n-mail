@@ -11,19 +11,19 @@ import (
 )
 
 // a goroutine to record matching events
-func reportEvent(db *sql.DB) {
+func reportEvent(db *sql.DB, worker string) {
   for {
     event := <- eventsToReport
     
     if event.bucket != "" {
-      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment) VALUES((select id from buckets where name = $1), $2, $3, $4, $5, $6, $7)`, event.bucket, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment)
+      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES((select id from buckets where name = $1), $2, $3, $4, $5, $6, $7, $8)`, event.bucket, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment, worker)
       if err != nil {
         fmt.Println("couldn't insert new event for bucket", event.bucket, "at", event.eventTimeStart, err)
         os.Exit(3)
       }
       r.Close()
     } else {
-      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment) VALUES(null, $1, $2, $3, $4, $5, $6)`, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment)
+      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES(null, $1, $2, $3, $4, $5, $6, $7)`, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment, worker)
       if err != nil {
         fmt.Println("couldn't insert new event for catchall bucket at", event.eventTimeStart, err)
         os.Exit(3)
