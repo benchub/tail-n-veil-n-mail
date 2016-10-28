@@ -152,7 +152,7 @@ func parseStuff(readFromHere chan *LogEvent, poolSize int, bucket string, match 
 func catchAll(readFromHere chan *LogEvent) {
   for {
     event := <- readFromHere
-    sendMatchToBucket("",event,true,nil)
+    sendMatchToBucket("",event,true)
   }
 }
 
