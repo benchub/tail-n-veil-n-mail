@@ -36,16 +36,8 @@ func reportEvent(db *sql.DB) {
 
 // Just because a function matches a bucket, we might not want to actually record it;
 // this function handles that logic.
-func sendMatchToBucket(bucket string, event *LogEvent, reportIt bool, reportOnlyFor map[string]bool) {
-  reportForMe := true
-  if reportOnlyFor != nil {
-    _, present := reportOnlyFor[event.key.host]
-    if !present {
-      reportForMe = false
-    }
-  }
-
-  if reportIt && reportForMe && !event.fragment {
+func sendMatchToBucket(bucket string, event *LogEvent, reportIt bool) {
+  if reportIt && !event.fragment {
     // fmt.Println("bucket",bucket,"gets event at",event.eventTimeEnd)
     event.bucket = bucket
     eventsToReport <- event

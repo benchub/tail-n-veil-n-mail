@@ -125,13 +125,22 @@ func parseStuff(readFromHere chan *LogEvent, poolSize int, bucket string, match 
         if matched && updateCounts {
           filtersToMatch <- filter_id
         }
-      
-        if !matched || (matched && !eatIt){
+
+        // we've matched, but will the bucket want it?
+        reportForMe := true
+        if reportOnlyFor != nil {
+          _, present := reportOnlyFor[event.key.host]
+          if !present {
+            reportForMe = false
+          }
+        }
+
+        if !matched || !reportForMe || (matched && !eatIt){
           // send it on
           sendToHere <- event
         } else {
           // process the match
-          sendMatchToBucket(bucket,event,reportIt,reportOnlyFor)
+          sendMatchToBucket(bucket,event,reportIt)
         }
       }
     }()
