@@ -64,6 +64,7 @@ ALTER SEQUENCE buckets_id_seq OWNED BY buckets.id;
 
 
 CREATE TABLE events (
+    id serial primary key,
     bucket_id integer,
     event text NOT NULL,
     started timestamp with time zone NOT NULL,
