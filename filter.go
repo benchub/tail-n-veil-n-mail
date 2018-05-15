@@ -2,7 +2,6 @@ package main
 
 import (
   "log"
-  "os"
   "regexp"
 )
 
@@ -18,8 +17,8 @@ func setUpParsers(db *sql.DB) {
   
   buckets, err := db.Query(`select id,name,workers,eat_it,report_it from buckets order by eat_it desc, workers desc`)
   if err != nil {
-    log.Println("couldn't select bucket list", err)
-    os.Exit(3)
+    log.Fatalln("couldn't select bucket list", err)
+    // will now exit because Fatal
   }
   for buckets.Next() {
     var id,workers int
@@ -27,8 +26,8 @@ func setUpParsers(db *sql.DB) {
     var eatIt,reportIt bool
     
     if err := buckets.Scan(&id,&name,&workers,&eatIt,&reportIt); err != nil {
-      log.Println("couldn't parse bucket row", err)
-      os.Exit(3)
+      log.Fatalln("couldn't parse bucket row", err)
+      // will now exit because Fatal
     }
     
     if lastFilter != nil {
@@ -52,14 +51,14 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
   m := make(map[string]bool)
   onlyon, err := db.Query(`select host from onlyon where bucket_id=$1`, id)
   if err != nil {
-    log.Println("couldn't select onlyon hosts for", id, err)
-    os.Exit(3)
+    log.Fatalln("couldn't select onlyon hosts for", id, err)
+    // will now exit because Fatal
   }
   for onlyon.Next() {
     var host string
     if err := onlyon.Scan(&host); err != nil {
-      log.Println("couldn't parse onlyon row for bucket", id, err)
-      os.Exit(3)
+      log.Fatalln("couldn't parse onlyon row for bucket", id, err)
+      // will now exit because Fatal
     }
     
     m[host] = true
@@ -67,16 +66,16 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
     log.Println("\tfor host",host)
   }
   if err := onlyon.Err(); err != nil {
-    log.Println("couldn't read onlyon hosts for", id, err)
-    os.Exit(3)
+    log.Fatalln("couldn't read onlyon hosts for", id, err)
+    // will now exit because Fatal
   }
   onlyon.Close()
 
   // buckets can have multiple matching filters. Get them here.
   filters, err := db.Query(`select filter,report,id from filters where bucket_id=$1`, id)
   if err != nil {
-    log.Println("couldn't select filters for", id, err)
-    os.Exit(3)
+    log.Fatalln("couldn't select filters for", id, err)
+    // will now exit because Fatal
   }
   for filters.Next() {
     var filter string
@@ -84,8 +83,8 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
     var report bool
     
     if err := filters.Scan(&filter, &report, &fid); err != nil {
-      log.Println("couldn't parse filter row for bucket", id, err)
-      os.Exit(3)
+      log.Fatalln("couldn't parse filter row for bucket", id, err)
+      // will now exit because Fatal
     }
     
     
@@ -98,8 +97,8 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
     }
   }
   if err:= filters.Err(); err != nil {
-    log.Println("couldn't read filters for", id, err)
-    os.Exit(3)
+    log.Fatalln("couldn't read filters for", id, err)
+    // will now exit because Fatal
   }
   filters.Close()
   
@@ -114,7 +113,7 @@ func parseStuff(readFromHere chan *LogEvent, poolSize int, bucket string, match 
     go func() {
       re, err := regexp.Compile(match)
       if err != nil {
-        log.Fprintln(os.Stderr, "regex compile error for", match, err)
+        log.Println("regex compile error for", match, err)
       }
     
       for {
@@ -162,8 +161,8 @@ func updateFilterUsages(db *sql.DB) {
 
     q, err := db.Query(`update filters set uses=uses+1 where id=$1`, id)
     if err != nil {
-      log.Println("couldn't update filter user count for filter", id, err)
-      os.Exit(3)
+      log.Fatalln("couldn't update filter user count for filter", id, err)
+      // will now exit because Fatal
     }
     q.Close()
   }

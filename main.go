@@ -236,13 +236,13 @@ func main() {
   }()
 
   if *configFileFlag == "" {
-    log.Println("I need a config file!")
-    os.Exit(1)
+    log.Fatalln("I need a config file!")
+    // will now exit because Fatal
   } else {
     configFile, err := os.Open(*configFileFlag)
     if err != nil {
-      log.Println("opening config file:", err)
-      os.Exit(2)
+      log.Fatalln("opening config file:", err)
+      // will now exit because Fatal
     }
     
     decoder := json.NewDecoder(configFile)
@@ -251,8 +251,8 @@ func main() {
     
     db, err = sql.Open("postgres", configuration.DBConn[0])
     if err != nil {
-      log.Println("couldn't connect to db", err)
-      os.Exit(2)
+      log.Fatalln("couldn't connect to db", err)
+      // will now exit because Fatal
     }
     
     status_interval = configuration.StatusInterval
@@ -269,8 +269,8 @@ func main() {
   }
 
   if *logFileFlag == "" {
-    log.Println("I need a log file!")
-    os.Exit(1)
+    log.Fatalln("I need a log file!")
+    // will now exit because Fatal
   }
 
   if *logFileOffsetFlag > 0 {
@@ -286,7 +286,8 @@ func main() {
     Poll: true,
     ReOpen: true})
   if err != nil {
-    log.Fprintln(os.Stderr, "couldn't tail file", err)
+    log.Fatalln("couldn't tail file", err)
+    // will now exit because Fatal
   }
   
   // start a goroutine to remove things that are ready to process from the inflight list
@@ -300,8 +301,8 @@ func main() {
   var mostRecentCompletedEvent time.Time
   err = db.QueryRow("select coalesce(max(finished),'1970-01-01') from events").Scan(&mostRecentCompletedEvent)
   if err != nil {
-    log.Println("couldn't find most recent event", err)
-    os.Exit(3)
+    log.Fatalln("couldn't find most recent event", err)
+    // will now exit because Fatal
   }
 
   
@@ -415,21 +416,21 @@ func processEvent(event *LogEvent) {
 func ignoreBlacklistedHosts(db *sql.DB) {
   ignored, err := db.Query(`select hosts from ignored_hosts`)
   if err != nil {
-    log.Println("couldn't select ignored_hosts hosts", err)
-    os.Exit(3)
+    log.Fatalln("couldn't select ignored_hosts hosts", err)
+    // will now exit because Fatal
   }
   for ignored.Next() {
     var host string
     if err := ignored.Scan(&host); err != nil {
-      log.Println("couldn't parse ignored row", err)
-      os.Exit(3)
+      log.Fatalln("couldn't parse ignored row", err)
+      // will now exit because Fatal
     }
 
-    ignoreFromHere[host] = {}
+    ignoreTheseHosts[host] = struct{}{}
   }
   if err := ignored.Err(); err != nil {
-    log.Println("couldn't read ignored hosts from db", err)
-    os.Exit(3)
+    log.Fatalln("couldn't read ignored hosts from db", err)
+    // will now exit because Fatal
   }
   ignored.Close()
 }
@@ -499,8 +500,8 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
   for {    
     rows, err := db.Query(fmt.Sprintf("select count(*),host,normalize_query(event) from events where bucket_id is null and finished > now()-interval '%d seconds' and worker='%s' group by host,normalize_query(event) order by normalize_query(event),host,count(*) desc", interval, worker))
     if err != nil {
-      log.Println("couldn't find recent interesting events", err)
-      os.Exit(3)
+      log.Fatalln("couldn't find recent interesting events", err)
+      // will now exit because Fatal
     }
     emailBody := ""
     for rows.Next() {
@@ -510,15 +511,15 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
 
       err = rows.Scan(&count, &host, &event)
       if err != nil {
-        log.Println("couldn't scan interesting event", err)
-        os.Exit(3)
+        log.Fatalln("couldn't scan interesting event", err)
+        // will now exit because Fatal
       }
       emailBody = fmt.Sprintf("%s<tr><td>%d</td><td>%s</td><td><pre>%s</pre></td></tr>\n",emailBody,count,host,event)
     }
     err = rows.Err()
     if err != nil {
-      log.Println("couldn't ennumerate interesting events", err)
-      os.Exit(3)
+      log.Fatalln("couldn't ennumerate interesting events", err)
+      // will now exit because Fatal
     }
     if (!strings.EqualFold("",emailBody)) {
       for i := range emails {
@@ -528,8 +529,8 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
         cmd.Stdout = &out
         err := cmd.Run()
         if err != nil {
-          log.Println(err)
-          os.Exit(3)
+          log.Fatalln(err)
+          // will now exit because Fatal
         }
       }
     }
