@@ -2,6 +2,7 @@ package main
 
 import (
   "fmt"
+  "log"
   "os"
   "time"
   "strings"
@@ -17,7 +18,7 @@ import (
 func watchForConfigChanges(db *sql.DB, conninfo string, args []string) {
     reportProblem := func(ev pq.ListenerEventType, err error) {
         if err != nil {
-            fmt.Println(err.Error())
+            log.Println(err.Error())
         }
     }
 
@@ -34,7 +35,7 @@ func watchForConfigChanges(db *sql.DB, conninfo string, args []string) {
             case <-time.After(90 * time.Second):
                 err = listener.Ping()
                 if err != nil {
-                  fmt.Println("server seems dead?", err)
+                  log.Println("server seems dead?", err)
                   os.Exit(3)
                 }
         }
@@ -54,11 +55,11 @@ func restartMe(args []string) {
   newArgs = append(newArgs, fmt.Sprintf("-warp=%d",warpTo.Offset))
   binary = fmt.Sprintf("%s/%s", os.Getenv("PWD"), args[0])
 
-  fmt.Println("received notification of a config change at ", warpTo.Offset)
+  log.Println("received notification of a config change at ", warpTo.Offset)
 
   execErr := syscall.Exec(binary, newArgs, os.Environ())
   if execErr != nil {
-    fmt.Println("couldn't exec!", execErr)
+    log.Println("couldn't exec!", execErr)
     os.Exit(3)    
   }
 }

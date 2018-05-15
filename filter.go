@@ -1,7 +1,7 @@
 package main
 
 import (
-  "fmt"
+  "log"
   "os"
   "regexp"
 )
@@ -18,7 +18,7 @@ func setUpParsers(db *sql.DB) {
   
   buckets, err := db.Query(`select id,name,workers,eat_it,report_it from buckets order by eat_it desc, workers desc`)
   if err != nil {
-    fmt.Println("couldn't select bucket list", err)
+    log.Println("couldn't select bucket list", err)
     os.Exit(3)
   }
   for buckets.Next() {
@@ -27,7 +27,7 @@ func setUpParsers(db *sql.DB) {
     var eatIt,reportIt bool
     
     if err := buckets.Scan(&id,&name,&workers,&eatIt,&reportIt); err != nil {
-      fmt.Println("couldn't parse bucket row", err)
+      log.Println("couldn't parse bucket row", err)
       os.Exit(3)
     }
     
@@ -46,28 +46,28 @@ func setUpParsers(db *sql.DB) {
 func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, workers int, eatIt bool, reportIt bool) chan *LogEvent {
   lastFilter := c
 
-  fmt.Println("Setting up filter for bucket",name)
+  log.Println("Setting up filter for bucket",name)
 
   // get the list of hosts to restrict this bucket to, if we have one
   m := make(map[string]bool)
   onlyon, err := db.Query(`select host from onlyon where bucket_id=$1`, id)
   if err != nil {
-    fmt.Println("couldn't select onlyon hosts for", id, err)
+    log.Println("couldn't select onlyon hosts for", id, err)
     os.Exit(3)
   }
   for onlyon.Next() {
     var host string
     if err := onlyon.Scan(&host); err != nil {
-      fmt.Println("couldn't parse onlyon row for bucket", id, err)
+      log.Println("couldn't parse onlyon row for bucket", id, err)
       os.Exit(3)
     }
     
     m[host] = true
     
-    fmt.Println("\tfor host",host)
+    log.Println("\tfor host",host)
   }
   if err := onlyon.Err(); err != nil {
-    fmt.Println("couldn't read onlyon hosts for", id, err)
+    log.Println("couldn't read onlyon hosts for", id, err)
     os.Exit(3)
   }
   onlyon.Close()
@@ -75,7 +75,7 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
   // buckets can have multiple matching filters. Get them here.
   filters, err := db.Query(`select filter,report,id from filters where bucket_id=$1`, id)
   if err != nil {
-    fmt.Println("couldn't select filters for", id, err)
+    log.Println("couldn't select filters for", id, err)
     os.Exit(3)
   }
   for filters.Next() {
@@ -84,12 +84,12 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
     var report bool
     
     if err := filters.Scan(&filter, &report, &fid); err != nil {
-      fmt.Println("couldn't parse filter row for bucket", id, err)
+      log.Println("couldn't parse filter row for bucket", id, err)
       os.Exit(3)
     }
     
     
-    fmt.Println("\tusing filter",filter)
+    log.Println("\tusing filter",filter)
 
     if len(m) == 0 {
       lastFilter = parseStuff(lastFilter,workers,name,filter,eatIt,reportIt,nil,fid,report)
@@ -98,7 +98,7 @@ func setUpParsersForBucket(db *sql.DB, c chan *LogEvent, id int, name string, wo
     }
   }
   if err:= filters.Err(); err != nil {
-    fmt.Println("couldn't read filters for", id, err)
+    log.Println("couldn't read filters for", id, err)
     os.Exit(3)
   }
   filters.Close()
@@ -114,7 +114,7 @@ func parseStuff(readFromHere chan *LogEvent, poolSize int, bucket string, match 
     go func() {
       re, err := regexp.Compile(match)
       if err != nil {
-        fmt.Fprintln(os.Stderr, "regex compile error for", match, err)
+        log.Fprintln(os.Stderr, "regex compile error for", match, err)
       }
     
       for {
@@ -162,7 +162,7 @@ func updateFilterUsages(db *sql.DB) {
 
     q, err := db.Query(`update filters set uses=uses+1 where id=$1`, id)
     if err != nil {
-      fmt.Println("couldn't update filter user count for filter", id, err)
+      log.Println("couldn't update filter user count for filter", id, err)
       os.Exit(3)
     }
     q.Close()

@@ -3,10 +3,12 @@ package main
 import (
   "bytes"
   "errors"
+  "log"
   "fmt"
   "time"
   "os"
   "os/exec"
+  "os/signal"
   "regexp"
   "strings"
   "strconv"
@@ -16,7 +18,7 @@ import (
 )
 
 import (
-  "github.com/ActiveState/tail"
+  "github.com/hpcloud/tail"
   _ "github.com/lib/pq"
   "database/sql"
 )
@@ -82,6 +84,9 @@ var cull = make(chan LogKey,100)
 var eventCount uint64
 var lastEventAt time.Time
 var warpTo tail.SeekInfo
+
+// A set of hosts that we don't want to process any events for
+var ignoreTheseHosts map[string]struct{}
 
 // A dictionary of what events we're currently waiting on to timeout or evict for processing
 var protectedEventsInFlight = struct{
@@ -218,13 +223,25 @@ func main() {
     os.Exit(0)
   }
 
+  sigs := make(chan os.Signal, 1)
+  // catch all signals since not explicitly listing
+  signal.Notify(sigs)
+  //signal.Notify(sigs,syscall.SIGQUIT)
+  // method invoked upon seeing signal
+  go func() {
+    s := <-sigs
+    log.Printf("RECEIVED SIGNAL: %s",s)
+    AppCleanup()
+    os.Exit(1)
+  }()
+
   if *configFileFlag == "" {
-    fmt.Println("I need a config file!")
+    log.Println("I need a config file!")
     os.Exit(1)
   } else {
     configFile, err := os.Open(*configFileFlag)
     if err != nil {
-      fmt.Println("opening config file:", err)
+      log.Println("opening config file:", err)
       os.Exit(2)
     }
     
@@ -234,7 +251,7 @@ func main() {
     
     db, err = sql.Open("postgres", configuration.DBConn[0])
     if err != nil {
-      fmt.Println("couldn't connect to db", err)
+      log.Println("couldn't connect to db", err)
       os.Exit(2)
     }
     
@@ -245,12 +262,14 @@ func main() {
     email_header = configuration.EmailHeader
     worker = configuration.Worker
 
+    ignoreBlacklistedHosts(db)
+
     // if we see configuration changes, we need to know about it
     go watchForConfigChanges(db, configuration.DBConn[0], os.Args)
   }
 
   if *logFileFlag == "" {
-    fmt.Println("I need a log file!")
+    log.Println("I need a log file!")
     os.Exit(1)
   }
 
@@ -267,7 +286,7 @@ func main() {
     Poll: true,
     ReOpen: true})
   if err != nil {
-    fmt.Fprintln(os.Stderr, "couldn't tail file", err)
+    log.Fprintln(os.Stderr, "couldn't tail file", err)
   }
   
   // start a goroutine to remove things that are ready to process from the inflight list
@@ -281,7 +300,7 @@ func main() {
   var mostRecentCompletedEvent time.Time
   err = db.QueryRow("select coalesce(max(finished),'1970-01-01') from events").Scan(&mostRecentCompletedEvent)
   if err != nil {
-    fmt.Println("couldn't find most recent event", err)
+    log.Println("couldn't find most recent event", err)
     os.Exit(3)
   }
 
@@ -303,7 +322,7 @@ func main() {
   go assembleRawLines(rawlines)
   
   caughtUp := false
-  fmt.Println("Beginning to catchup scan to", mostRecentCompletedEvent)
+  log.Println("Beginning to catchup scan to", mostRecentCompletedEvent)
 
   buffer := RawLine{}
   for {
@@ -337,7 +356,7 @@ func main() {
         lastEventAt = newEvent.eventTimeStart
 
         if mostRecentCompletedEvent.Before(newEvent.eventTimeStart) {
-          fmt.Println("Catchup complete!")
+          log.Println("Catchup complete!")
           caughtUp = true
           rawlines <- &newEvent
         }
@@ -347,7 +366,7 @@ func main() {
   }
 
   // until we implement graceful exiting, we'll never get here
-  fmt.Println("done reading!")
+  AppCleanup()
 }
 
 func beginEvent(event *LogEvent) {
@@ -383,8 +402,36 @@ func processEvent(event *LogEvent) {
   lastEventAt = event.eventTimeEnd
   
   // now that the event is all wrapped up and packaged,
-  // send it into the filter chain
-  firstFilter <- event
+  // see if it comes from a host we are ignoring.
+  i, ignoreFromHere := ignoreTheseHosts[event.key.host]
+  if(ignoreFromHere) {
+    // this event comes from a host we're ignoring; forgetabouit
+  } else {
+    // send it into the filter chain
+    firstFilter <- event
+  }
+}
+
+func ignoreBlacklistedHosts(db *sql.DB) {
+  ignored, err := db.Query(`select hosts from ignored_hosts`)
+  if err != nil {
+    log.Println("couldn't select ignored_hosts hosts", err)
+    os.Exit(3)
+  }
+  for ignored.Next() {
+    var host string
+    if err := ignored.Scan(&host); err != nil {
+      log.Println("couldn't parse ignored row", err)
+      os.Exit(3)
+    }
+
+    ignoreFromHere[host] = {}
+  }
+  if err := ignored.Err(); err != nil {
+    log.Println("couldn't read ignored hosts from db", err)
+    os.Exit(3)
+  }
+  ignored.Close()
 }
 
 func cullStuff(c chan LogKey) {
@@ -397,7 +444,7 @@ func cullStuff(c chan LogKey) {
       delete(protectedEventsInFlight.m,killMe)
     } else {
       // hm, that's wierd
-      fmt.Println("shouldn't be here",killMe.id)
+      log.Println("shouldn't be here",killMe.id)
     }
     protectedEventsInFlight.Unlock()
 
@@ -425,7 +472,7 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
     flying := len(protectedEventsInFlight.m)
     protectedEventsInFlight.RUnlock()
 
-    fmt.Println(time.Now(),":",flying,"in flight,",eventCount,"processed so far,",warpTo.Offset,"seek, currently at:",lastEventAt)
+    log.Println(time.Now(),":",flying,"in flight,",eventCount,"processed so far,",warpTo.Offset,"seek, currently at:",lastEventAt)
     if (noIdleHands && lastProcessed == eventCount ) {
       if almostDead {
         var m map[string]int
@@ -452,7 +499,7 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
   for {    
     rows, err := db.Query(fmt.Sprintf("select count(*),host,normalize_query(event) from events where bucket_id is null and finished > now()-interval '%d seconds' and worker='%s' group by host,normalize_query(event) order by normalize_query(event),host,count(*) desc", interval, worker))
     if err != nil {
-      fmt.Println("couldn't find recent interesting events", err)
+      log.Println("couldn't find recent interesting events", err)
       os.Exit(3)
     }
     emailBody := ""
@@ -463,14 +510,14 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
 
       err = rows.Scan(&count, &host, &event)
       if err != nil {
-        fmt.Println("couldn't scan interesting event", err)
+        log.Println("couldn't scan interesting event", err)
         os.Exit(3)
       }
       emailBody = fmt.Sprintf("%s<tr><td>%d</td><td>%s</td><td><pre>%s</pre></td></tr>\n",emailBody,count,host,event)
     }
     err = rows.Err()
     if err != nil {
-      fmt.Println("couldn't ennumerate interesting events", err)
+      log.Println("couldn't ennumerate interesting events", err)
       os.Exit(3)
     }
     if (!strings.EqualFold("",emailBody)) {
@@ -481,7 +528,7 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
         cmd.Stdout = &out
         err := cmd.Run()
         if err != nil {
-          fmt.Println(err)
+          log.Println(err)
           os.Exit(3)
         }
       }
@@ -491,3 +538,6 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
   }
 }
 
+func AppCleanup() {
+  log.Println("...and that's all folks!")
+}
