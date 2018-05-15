@@ -86,7 +86,7 @@ var lastEventAt time.Time
 var warpTo tail.SeekInfo
 
 // A set of hosts that we don't want to process any events for
-var ignoreTheseHosts map[string]struct{}
+var ignoreTheseHosts = make(map[string]struct{})
 
 // A dictionary of what events we're currently waiting on to timeout or evict for processing
 var protectedEventsInFlight = struct{
@@ -404,7 +404,7 @@ func processEvent(event *LogEvent) {
   
   // now that the event is all wrapped up and packaged,
   // see if it comes from a host we are ignoring.
-  i, ignoreFromHere := ignoreTheseHosts[event.key.host]
+  _, ignoreFromHere := ignoreTheseHosts[event.key.host]
   if(ignoreFromHere) {
     // this event comes from a host we're ignoring; forgetabouit
   } else {
@@ -414,7 +414,7 @@ func processEvent(event *LogEvent) {
 }
 
 func ignoreBlacklistedHosts(db *sql.DB) {
-  ignored, err := db.Query(`select hosts from ignored_hosts`)
+  ignored, err := db.Query(`select host from ignored_hosts`)
   if err != nil {
     log.Fatalln("couldn't select ignored_hosts hosts", err)
     // will now exit because Fatal
