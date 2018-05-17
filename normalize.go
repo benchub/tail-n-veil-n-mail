@@ -39,6 +39,7 @@ type Fingerprint struct {
   last int64
   sum float64
   stats RunningStat
+  allTimeStats RunningStat
   db_id int64
 }
 
@@ -65,20 +66,16 @@ func normalizeEvents(db *sql.DB, c chan bytes.Buffer) {
       	raw_sql = matches[3]
       }
       clean_sql := strings.Replace(raw_sql,"#011", "  ", -1)
-      
-      // get rid of lines starting with --
-
-      single_line_sql := strings.Replace(clean_sql,"\n","",-1)
       duration := matches[1]
 
-      normalized, err := pg_query.Normalize(single_line_sql)
+      normalized, err := pg_query.Normalize(clean_sql)
       if err != nil {
-      	log.Printf("couldn't normalize %s because %s", single_line_sql, err)
+      	log.Printf("couldn't normalize %s because %s", clean_sql, err)
       	continue
       }
-      fingerprint, err := pg_query.FastFingerprint(single_line_sql)
+      fingerprint, err := pg_query.FastFingerprint(clean_sql)
       if err != nil {
-      	log.Printf("couldn't normalize %s RAW QUERY (%s) because %s", single_line_sql, raw_sql, err)
+      	log.Printf("couldn't normalize %s RAW QUERY (%s) because %s", clean_sql, raw_sql, err)
       	continue
       }
 
@@ -172,6 +169,7 @@ func reportSamples(db *sql.DB, f *Fingerprint) {
 					// lock the stats block for writing; these stats are in the db; we don't need to keep counting them.
 					f.statsLock.RUnlock()
 					f.statsLock.Lock()
+					f.allTimeStats = f.stats
 					f.stats.m_n = 0
 					f.stats.m_oldM = 0
 					f.stats.m_newM = 0
@@ -203,6 +201,7 @@ func reportSamples(db *sql.DB, f *Fingerprint) {
 					// lock the stats block for writing
 					f.statsLock.RUnlock()
 					f.statsLock.Lock()
+					f.allTimeStats = combined
 					f.stats.m_n = 0
 					f.stats.m_oldM = 0
 					f.stats.m_newM = 0
@@ -219,7 +218,7 @@ func reportSamples(db *sql.DB, f *Fingerprint) {
 				        continue
 				    }
 				    r.Close()
-					log.Printf("fingerprint %d has seen %d calls; last at %d, sum at %f (%f), mean %f, deviation %f", f.db_id, combined.m_n, f.last, f.sum, float64(combined.m_n)*combined.m_oldM, RunningStatMean(combined), RunningStatDeviation(combined))
+					//log.Printf("fingerprint %d has seen %d calls; last at %d, sum at %f (%f), mean %f, deviation %f", f.db_id, combined.m_n, f.last, f.sum, float64(combined.m_n)*combined.m_oldM, RunningStatMean(combined), RunningStatDeviation(combined))
 			}
 
 			err = tx.Commit()
@@ -238,12 +237,21 @@ func consumeSamples(f *Fingerprint) {
 	for {
 		sample := <- f.samples
 
-		// lock the stats block for writing
+		// lock the stats block for writing our update
 		f.statsLock.Lock()
 		f.last = sample.unixtime
 		f.sum += sample.duration
 		f.stats = Push(sample.duration,f.stats)
 		f.statsLock.Unlock()
+
+		// now compare our update against the allTimeStats if there are enough there to make a difference
+		f.statsLock.RLock()
+		if f.allTimeStats.m_n > 32 {
+			if sample.duration > (RunningStatMean(f.allTimeStats) + 3*RunningStatDeviation(f.allTimeStats)) {
+				log.Printf("fingerprint %d (seen %d times) took %f ms but normally takes %f +/- %f", f.db_id, f.allTimeStats.m_n, sample.duration, RunningStatMean(f.allTimeStats), RunningStatDeviation(f.allTimeStats))
+			}
+		}
+		f.statsLock.RUnlock()
 	}
 }
 

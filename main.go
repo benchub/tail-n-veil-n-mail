@@ -31,6 +31,9 @@ type LogKey struct
   // what host the event came from
   host string
   
+  // what pid the event came from
+  pid uint64
+
   // the syslog id, which gets recycled
   id uint64
 }
@@ -108,11 +111,14 @@ var protectedEventsInFlight = struct{
 } {m: make(map[LogKey]*LogEvent)}
 
 var re_logid,_ = regexp.Compile(`[0-9]+-[0-9]+`)
+var re_pidid,_ = regexp.Compile(`\[(\d+)\]`)
+var re_leading_whitespace,_ = regexp.Compile(`^((#011)|(\s+))`)
 
 type RawLine struct {
   t PoorMansTime
   host string
   text string
+  pid uint64
   keyID uint64
   keyLine uint64
 }
@@ -144,6 +150,17 @@ func decodeSyslogPrefix(blob string) (RawLine,error) {
   r.keyID, err = strconv.ParseUint(logidTokens[0],10,32)
   if err != nil {
     return RawLine{}, errors.New("Couldn't parse keyID")
+  }
+  if re_pidid.MatchString(syslogTokens[2]) {
+    matches := re_pidid.FindStringSubmatch(syslogTokens[2])
+    r.pid, err = strconv.ParseUint(matches[1],10,32)
+    if err != nil {
+      log.Println("pid",matches[1],"isn't numeric?")
+      return RawLine{}, errors.New("Invalid pid")
+    }
+  } else {
+    log.Println("no pid in",syslogTokens[2])
+    return RawLine{}, errors.New("Couldn't parse pid")
   }
   r.keyLine, err = strconv.ParseUint(logidTokens[1],10,32)
   if err != nil {
@@ -193,7 +210,13 @@ func assembleRawLines(newlines chan *LogEvent) {
         // If we're in the process of culling the event..... well, that sucks. Guess we 
         // should have giving it more time.
         existingEvent.eventTimeEnd = line.eventTimeEnd
-        existingEvent.eventText = existingEvent.eventText + "\n" + line.eventText
+        startsWithWhitespace := re_leading_whitespace.MatchString(line.eventText)
+
+        if startsWithWhitespace {
+          existingEvent.eventText = existingEvent.eventText + "\n" + line.eventText
+        } else {
+          existingEvent.eventText = existingEvent.eventText + line.eventText
+        }
         existingEvent.lines++
       }
     } else {
@@ -372,6 +395,7 @@ func main() {
           newEvent.eventTimeStart = buffer.t
           newEvent.eventTimeEnd = buffer.t
           newEvent.key.host = buffer.host
+          newEvent.key.pid = buffer.pid
           newEvent.key.id = buffer.keyID
           newEvent.lines = buffer.keyLine
         } else {
@@ -527,7 +551,7 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
 
 func sendEmails(interval int, db *sql.DB, emails []string, subject string, header string, worker string) {
 
-  emailHeader := "<html><body>" + header + "\n<p>\nLast 5 minutes:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>"
+  emailHeader := "<html><body>" + header + fmt.Sprintf("\n<p>\nLast %d seconds:\n<table><tr><td>Count</td><td>Host</td><td>Normalized Event</td></tr>", interval)
   emailFooter := "</table></body></html>"
 
   for {    
