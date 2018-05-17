@@ -7,6 +7,7 @@ import (
   "fmt"
   "time"
   "os"
+  "syscall"
   "os/exec"
   "os/signal"
   "regexp"
@@ -15,6 +16,8 @@ import (
   "sync"
   "encoding/json"
   "flag"
+  "runtime/pprof"
+  "runtime"
 )
 
 import (
@@ -32,6 +35,13 @@ type LogKey struct
   id uint64
 }
 
+type PoorMansTime struct
+{
+  // a pointerless version of time.Time, in an attempt to reduce GC activity.
+  // We will assume all times are in UTC (which is just God's Time anyway)
+  sec int64
+}
+
 type LogEvent struct
 {
   // for concurrency protection
@@ -47,11 +57,11 @@ type LogEvent struct
   eventText string
   
   // the syslog time of the first line
-  eventTimeStart time.Time
+  eventTimeStart PoorMansTime
   
   // the syslog time of the last line
-  eventTimeEnd time.Time
-  
+  eventTimeEnd PoorMansTime
+
   // how many lines the event spanned
   lines uint64
   
@@ -65,6 +75,9 @@ type LogEvent struct
   // Which bucket the event matched
   bucket string
 }
+
+// We want to normalize the query text we get, asynchronously. Send event text here.
+var normalizeThese = make(chan bytes.Buffer,1000)
 
 // Every filter is handled by a distinct goroutine. This is the channel to send
 // events to the first filter in the chain of filters.
@@ -82,7 +95,7 @@ var cull = make(chan LogKey,100)
 // Some stats that we won't bother to make concurrency-safe.
 // They're never decremented anyway.
 var eventCount uint64
-var lastEventAt time.Time
+var lastEventAt PoorMansTime
 var warpTo tail.SeekInfo
 
 // A set of hosts that we don't want to process any events for
@@ -97,7 +110,7 @@ var protectedEventsInFlight = struct{
 var re_logid,_ = regexp.Compile(`[0-9]+-[0-9]+`)
 
 type RawLine struct {
-  t time.Time
+  t PoorMansTime
   host string
   text string
   keyID uint64
@@ -108,16 +121,18 @@ type RawLine struct {
 func decodeSyslogPrefix(blob string) (RawLine,error) {
   r := RawLine{}
   var err error
+  var inefficientTime time.Time
 
   // break out the stuff that syslog adds to every line
   syslogTokens := strings.SplitN(blob," ",5)
   if len(syslogTokens) != 5 {
     return RawLine{}, errors.New("couldn't split line into 5 tokens")
   }
-  r.t, err = time.Parse(time.RFC3339Nano,syslogTokens[0])
+  inefficientTime, err = time.Parse(time.RFC3339Nano,syslogTokens[0])
   if err != nil {
     return RawLine{}, errors.New("couldn't parse time")
   }
+  r.t.sec = inefficientTime.Unix()
   r.host = syslogTokens[1]
   r.text = syslogTokens[4]
     
@@ -196,6 +211,8 @@ var configFileFlag = flag.String("config", "", "the config file")
 var logFileFlag = flag.String("log", "", "the log file")
 var logFileOffsetFlag = flag.Int64("warp", 0, "open the log file to this offset")
 var noIdleHandsFlag = flag.Bool("noIdleHands", false, "when set to true, kill us (ungracefully) if we seem to be doing nothing")
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+var memprofile = flag.String("memprofile", "", "write mem profile to file")
 
 type Configuration struct {
   DBConn []string
@@ -217,7 +234,14 @@ func main() {
   var worker string
 
   flag.Parse()
-  
+  if *cpuprofile != "" {
+    f, err := os.Create(*cpuprofile)
+    if err != nil {
+      log.Fatal(err)
+    }
+    pprof.StartCPUProfile(f)
+  }
+
   if len(os.Args) == 1 {
     flag.PrintDefaults()
     os.Exit(0)
@@ -225,8 +249,8 @@ func main() {
 
   sigs := make(chan os.Signal, 1)
   // catch all signals since not explicitly listing
-  signal.Notify(sigs)
-  //signal.Notify(sigs,syscall.SIGQUIT)
+  signal.Notify(sigs,syscall.SIGQUIT,syscall.SIGTERM,syscall.SIGINT)
+  //signal.Notify(sigs)
   // method invoked upon seeing signal
   go func() {
     s := <-sigs
@@ -293,6 +317,9 @@ func main() {
   // start a goroutine to remove things that are ready to process from the inflight list
   go cullStuff(cull)
   
+  // start a goroutine to normalize the events we see
+  go normalizeEvents(db, normalizeThese)
+
   // set up our filter goroutines
   setUpParsers(db)
   go updateFilterUsages(db)
@@ -319,7 +346,7 @@ func main() {
   // but we can at least do that on another "thread" from where we're reading input and 
   // looking for newlines. Maybe that'll make us Go Moar Faster.
   // (Now that we're using the tail package this might be a waste.)
-  rawlines := make(chan *LogEvent,1000)
+  rawlines := make(chan *LogEvent,10000)
   go assembleRawLines(rawlines)
   
   caughtUp := false
@@ -356,13 +383,13 @@ func main() {
       if !caughtUp {
         lastEventAt = newEvent.eventTimeStart
 
-        if mostRecentCompletedEvent.Before(newEvent.eventTimeStart) {
+        if (mostRecentCompletedEvent.Unix() < newEvent.eventTimeStart.sec) {
           log.Println("Catchup complete!")
           caughtUp = true
           rawlines <- &newEvent
         }
       } else {
-        rawlines <- &newEvent
+          rawlines <- &newEvent
       }
   }
 
@@ -408,6 +435,11 @@ func processEvent(event *LogEvent) {
   if(ignoreFromHere) {
     // this event comes from a host we're ignoring; forgetabouit
   } else {
+    // send the text of this event to the normalizer
+    var normalizeThis bytes.Buffer
+    normalizeThis.WriteString(event.eventText)
+    normalizeThese <- normalizeThis
+
     // send it into the filter chain
     firstFilter <- event
   }
@@ -473,7 +505,8 @@ func reportProgress(noIdleHands bool, interval int, logfile *tail.Tail) {
     flying := len(protectedEventsInFlight.m)
     protectedEventsInFlight.RUnlock()
 
-    log.Println(time.Now(),":",flying,"in flight,",eventCount,"processed so far,",warpTo.Offset,"seek, currently at:",lastEventAt)
+//    log.Println(time.Now(),":",flying,"in flight,",eventCount,"processed so far,",warpTo.Offset,"seek, currently at:",lastEventAt)
+    log.Println(flying,"in flight,",eventCount,"processed so far,",warpTo.Offset,"seek, currently",time.Now().Unix()-lastEventAt.sec,"seconds behind")
     if (noIdleHands && lastProcessed == eventCount ) {
       if almostDead {
         var m map[string]int
@@ -541,4 +574,16 @@ func sendEmails(interval int, db *sql.DB, emails []string, subject string, heade
 
 func AppCleanup() {
   log.Println("...and that's all folks!")
+  pprof.StopCPUProfile()
+  if *memprofile != "" {
+    f, err := os.Create(*memprofile)
+    if err != nil {
+      log.Fatal("could not create memory profile: ", err)
+    }
+    runtime.GC() // get up-to-date statistics
+    if err := pprof.WriteHeapProfile(f); err != nil {
+      log.Fatal("could not write memory profile: ", err)
+    }
+    f.Close()
+  }
 }

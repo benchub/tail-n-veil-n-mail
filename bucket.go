@@ -3,6 +3,7 @@ package main
 import (
   "log"
   "os"
+  "time"
 )
 
 import (
@@ -16,16 +17,16 @@ func reportEvent(db *sql.DB, worker string) {
     event := <- eventsToReport
     
     if event.bucket != "" {
-      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES((select id from buckets where name = $1), $2, $3, $4, $5, $6, $7, $8)`, event.bucket, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment, worker)
+      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES((select id from buckets where name = $1), $2, $3, $4, $5, $6, $7, $8)`, event.bucket, event.key.host, event.eventText, time.Unix(event.eventTimeStart.sec,0), time.Unix(event.eventTimeEnd.sec,0), event.lines, event.fragment, worker)
       if err != nil {
-        log.Println("couldn't insert new event for bucket", event.bucket, "at", event.eventTimeStart, err)
+        log.Println("couldn't insert new event for bucket", event.bucket, "at", time.Unix(event.eventTimeStart.sec,0), err)
         os.Exit(3)
       }
       r.Close()
     } else {
-      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES(null, $1, $2, $3, $4, $5, $6, $7)`, event.key.host, event.eventText, event.eventTimeStart, event.eventTimeEnd, event.lines, event.fragment, worker)
+      r, err := db.Query(`INSERT INTO events(bucket_id, host, event, started, finished, lines, fragment, worker) VALUES(null, $1, $2, $3, $4, $5, $6, $7)`, event.key.host, event.eventText, time.Unix(event.eventTimeStart.sec,0), time.Unix(event.eventTimeEnd.sec,0), event.lines, event.fragment, worker)
       if err != nil {
-        log.Println("couldn't insert new event for catchall bucket at", event.eventTimeStart, err)
+        log.Println("couldn't insert new event for catchall bucket at", time.Unix(event.eventTimeStart.sec,0), err)
         os.Exit(3)
       }
       r.Close()

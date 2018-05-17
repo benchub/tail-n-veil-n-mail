@@ -38,9 +38,10 @@ How to use it
 =============
 1. Get and install Go. http://www.golang.org
 2. After setting up your $GOPATH, get the code:
-  go get github.com/ActiveState/tail/
+  go get github.com/hpcloud/tail/
   go get github.com/lib/pq
   go get github.com/benchub/tail-n-veil-n-mail
+  go get github.com/lfittl/pg_query_go
 3. go build github.com/benchub/tail-n-veil-n-mail
 4. Get yourself a postgres database somewhere and import schema.sql into it. Note that it
    assumes you have a role called tnvnm and another called www. It would be good to make 
