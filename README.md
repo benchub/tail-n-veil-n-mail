@@ -14,7 +14,7 @@ it will read the list of buckets to group log entries together into (e.g. "start
 noise", "bug 123", "utf8 errors") and also the regex filters used to do the grouping. 
 Then it will start tailing a file and keep track of the syslog events in flight. 
 
-When an event "completes" (either because that same syslog ID go reused, or because
+When an event "completes" (either because that same syslog ID got reused, or because
 enough time passed since we last saw a line for that syslog ID), the completed event is 
 passed to the regex filters that got loaded from the database during startup. The event
 is passed from filter to filter until one matches. When a regex filter matches a log event, 
@@ -22,14 +22,17 @@ it will be stored in the event database if the corrosponding bucket is configure
 matches. If an event matches *no* filters, then it is considered "interesting", and gets
 a special status in the UI.
 
+This brings us to a serious bonus feature over tail-n-mail: because we are recording events
+in a database, we can record how long they took to complete on average. If we start seeing
+the "same" normalized query taking much longer than normal, we can yell about it as if it 
+too is an error.
+
 Assumptions
 ===========
 As a young project tail-n-veil-n-mail makes a lot of assumptions. Among them:
 
 1. You are using a centralized log server with syslog-style logging.
-2. You have databases with distinct non-qualified host names (i.e. db-foo and db-bar, 
-   *not* db.foo and db.bar)
-3. You have mailx installed where you'll be running tail-n-veil-n-mail.
+2. You have mailx installed where you'll be running tail-n-veil-n-mail.
 
 tail-n-veil-n-mail actually supports multiple log servers, in independent regions...
 documenting this is a future challenge.
@@ -43,9 +46,24 @@ How to use it
   go get github.com/benchub/tail-n-veil-n-mail
   go get github.com/lfittl/pg_query_go
 3. go build github.com/benchub/tail-n-veil-n-mail
-4. Get yourself a postgres database somewhere and import schema.sql into it. Note that it
-   assumes you have a role called tnvnm and another called www. It would be good to make 
-   these roles if you don't have them.
+4. Import the schema. This is complicated by the fact that tnvnm supports multiple
+   partitions of the data. We use it for data soverignty rules (data in the EU must 
+   stay there, data in Canada must stay there, etc.) but you might also concievably need
+   the partitions to deal with data volume. The point is, there are three files in 
+   schema/.
+   1. control.sql goes onto a "central" db. This is the one your UI, such as it is, will
+      talk to. Install it into the public schema.
+   2. function.sql goes into the public schema of all your dbs.
+   3. partition.sql goes into a schema on just one db. You'll want to replace the string
+      "tnvnm-partition-name" for each partition you push it into. Note this assumes there 
+      is a user with the same name as the partition.
+   4. foreign_partion.sql mirrors partition.sql, except it lives on the central server. 
+      It's goal is to set up the foreign tables. You will want to modify "tnvnm-partition-name"
+      and "tnvnm-server-name" as appropriate, and install in your central server for
+      each partition.
+   5. In addition to all that, the roles "tnvnm" and "www" are expected to be on every 
+      server, and also reachable to every server from the central db as foreign servers.
+      Remember to create the user mappings, if needed, for any foreign servers.
 6. Import some buckets and their associated filters. example filters.sql has some examples.
    Also see https://github.com/benchub/tail-n-veil-n-mail-import, which makes it easy. 
    Some things to know:
@@ -97,8 +115,6 @@ Um yeah quite a bit.
   same event db.
 - Allow run-time config reloading. We sort of have this, if the filter config changes,
   but not if we want to make conf file changes only.
-- Dump status to a logfile instead of stdout.
-- Dump errors to a logfile instead of stderr.
 - Allow observations of a bucket to also trigger emails, instead of just interesting things.
   Probably good to give each bucket a specific list of email addresses to use if the
   default isn't wanted.
