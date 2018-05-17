@@ -161,7 +161,7 @@ func updateFilterUsages(db *sql.DB) {
 
     q, err := db.Query(`update filters set uses=uses+1 where id=$1`, id)
     if err != nil {
-      log.Fatalln("couldn't update filter user count for filter", id, err)
+      log.Fatalln("couldn't update filter uses count for filter", id, err)
       // will now exit because Fatal
     }
     q.Close()
